@@ -10,21 +10,25 @@
             justify-content: center;
             align-items: center;
             min-height: 100vh;
-            background: linear-gradient(to bottom, #0077be, #00a8e0); /* Dégradé océan */
+            background: linear-gradient(to bottom, #0077be, #00a8e0);
             font-family: 'Arial', sans-serif;
             color: white;
             margin: 0;
-            overflow: hidden; /* Empêche les barres de défilement */
+            overflow: hidden;
+            padding: 20px; /* Ajoute un espace sur tous les côtés */
         }
 
         .game-container {
             display: flex;
-            align-items: flex-start; /* Aligne la grille et le score en haut */
-            gap: 30px; /* Espace entre la grille et les infos */
+            align-items: flex-start;
+            gap: 30px;
             padding: 20px;
-            background-color: rgba(0, 50, 100, 0.6); /* Fond semi-transparent bleu foncé */
+            background-color: rgba(0, 50, 100, 0.6);
             border-radius: 15px;
             box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+            max-width: 800px; /* Limite la largeur maximale */
+            margin: 0 auto; /* Centre horizontalement si la largeur est limitée */
+            transform: scale(0.8); /* Réduit légèrement la taille globale */
         }
 
         #game-board {
@@ -295,9 +299,7 @@
             currentRow = 0; // Commence à la ligne 0
 
             // Vérifie immédiatement si la nouvelle pièce entre en collision (cas Game Over)
-            if (checkCollision(currentRow, currentCol, currentRotation)) {
-                return false; // Impossible de placer la pièce
-            }
+            return !checkCollision(currentRow, currentCol, currentRotation); // Retourne true si la pièce peut être placée
             return true; // La pièce a été placée avec succès
         }
 
