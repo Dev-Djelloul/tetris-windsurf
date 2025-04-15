@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tetris Windsurf</title>
+    <style>
+        body {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(to bottom, #0077be, #00a8e0); /* Dégradé océan */
+            font-family: 'Arial', sans-serif;
+            color: white;
+            margin: 0;
+            overflow: hidden; /* Empêche les barres de défilement */
+        }
+
+        .game-container {
+            display: flex;
+            align-items: flex-start; /* Aligne la grille et le score en haut */
+            gap: 30px; /* Espace entre la grille et les infos */
+            padding: 20px;
+            background-color: rgba(0, 50, 100, 0.6); /* Fond semi-transparent bleu foncé */
+            border-radius: 15px;
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        #game-board {
+            display: grid;
+            grid-template-columns: repeat(10, 30px); /* 10 colonnes */
+            grid-template-rows: repeat(20, 30px);    /* 20 lignes */
+            gap: 1px; /* Petit espace entre les cellules */
+            border: 5px solid #ffffff; /* Bordure blanche épaisse */
+            background-color: rgba(135, 206, 250, 0.3); /* Bleu ciel transparent pour la grille */
+            position: relative; /* Pour le positionnement absolu des effets */
+            overflow: hidden; /* Cache les effets qui dépassent */
+        }
+
+        .cell {
+            width: 30px;
+            height: 30px;
+            background-color: transparent; /* Cellules vides transparentes */
+            border: 1px solid rgba(255, 255, 255, 0.1); /* Bordure très légère */
+            box-sizing: border-box; /* Inclut la bordure dans la taille */
+        }
+
+        /* Couleurs des pièces (thème marin/voile) */
+        .cell.T { background-color: #FF6B6B; } /* Corail */
+        .cell.O { background-color: #FFD93D; } /* Jaune soleil */
+        .cell.L { background-color: #6BCB77; } /* Vert algue */
+        .cell.J { background-color: #4D96FF; } /* Bleu vague */
+        .cell.I { background-color: #F4A261; } /* Orange sable */
+        .cell.S { background-color: #9B5DE5; } /* Violet crépuscule */
+        .cell.Z { background-color: #F15BB5; } /* Rose coquillage */
+
+        /* Style pour les pièces actives */
+        .cell.active {
+            box-shadow: inset 0 0 5px rgba(255, 255, 255, 0.7); /* Effet lumineux */
+        }
+
+        /* Style pour les pièces figées */
+        .cell.locked {
+            opacity: 0.8; /* Légèrement moins visible */
+        }
+
+        .game-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        #score-board {
+            font-size: 1.5em;
+            font-weight: bold;
+            background-color: rgba(0, 0, 0, 0.4);
+            padding: 10px 20px;
+            border-radius: 8px;
+        }
+
+        /* Animation de cascade pour la ligne supprimée */
+        .clearing {
+            animation: cascade 0.5s ease-out forwards;
+        }
+
+        @keyframes cascade {
+            0% {
+                transform: translateY(0) scale(1);
+                opacity: 1;
+                background-color: #ffffff; /* Flash blanc */
+            }
+            50% {
+                opacity: 0.8;
+            }
+            100% {
+                transform: translateY(60px) scale(0.5); /* Tombe et rétrécit */
+                opacity: 0;
+                background-color: #87CEEB; /* Bleu clair final */
+            }
+        }
+
+        /* Message de Game Over */
+        #game-over {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(255, 0, 0, 0.8);
+            color: white;
+            padding: 20px 40px;
+            font-size: 2em;
+            border-radius: 10px;
+            display: none; /* Caché par défaut */
+            z-index: 100;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div id="game-board"></div>
+        <div class="game-info">
+            <h2>Tetris Windsurf</h2>
+            <div id="score-board">Score: 0</div>
+            <div>
+                <p>Contrôles :</p>
+                <p>← : Gauche</p>
+                <p>→ : Droite</p>
+                <p>↓ : Accélérer</p>
+                <p>↑ : Rotation</p>
+                <p>Espace : Chute</p> <!-- Ajout info contrôle -->
+            </div>
+        </div>
+    </div>
+    <div id="game-over">GAME OVER<br><small>Rafraîchir pour rejouer</small></div>
+
+    <script>
+        // --- Configuration du jeu ---
+        const BOARD_WIDTH = 10;
+        const BOARD_HEIGHT = 20;
+        const CELL_SIZE = 30; // Doit correspondre au CSS
+        const START_SPEED = 800; // Millisecondes entre chaque descente automatique
+
+        // --- Éléments du DOM ---
+        const gameBoardElement = document.getElementById('game-board');
+        const scoreBoardElement = document.getElementById('score-board');
+        const gameOverElement = document.getElementById('game-over');
+
+        // --- État du jeu ---
+        let board = []; // Tableau 2D représentant la grille (0 = vide, 1 = pièce figée)
+        let score = 0;
+        let currentPiece; // La pièce actuellement contrôlée par le joueur
+        let currentRow;
+        let currentCol;
+        let currentRotation;
+        let gameInterval; // Pour la boucle de jeu (descente auto)
+        let isGameOver = false;
+        let currentSpeed = START_SPEED;
+
+        // --- Définition des formes des pièces (Tetrominos) ---
+        // Chaque pièce est définie par ses formes possibles (rotations)
+        // Chaque forme est un tableau 2D de 0 et 1 (1 représente un bloc de la pièce)
+        // La lettre correspond à la classe CSS pour la couleur
+        const TETROMINOS = {
+            'T': {
+                color: 'T',
+                shapes: [
+                    [[0, 1, 0], [1, 1, 1]],
+                    [[1, 0], [1, 1], [1, 0]],
+                    [[1, 1, 1], [0, 1, 0]],
+                    [[0, 1], [1, 1], [0, 1]]
+                ]
+            },
+            'O': {
+                color: 'O',
+                shapes: [
+                    [[1, 1], [1, 1]]
+                ]
+            },
+            'L': {
+                color: 'L',
+                shapes: [
+                    [[0, 0, 1], [1, 1, 1]],
+                    [[1, 0], [1, 0], [1, 1]],
+                    [[1, 1, 1], [1, 0, 0]],
+                    [[1, 1], [0, 1], [0, 1]]
+                ]
+            },
+            'J': {
+                color: 'J',
+                shapes: [
+                    [[1, 0, 0], [1, 1, 1]],
+                    [[1, 1], [1, 0], [1, 0]],
+                    [[1, 1, 1], [0, 0, 1]],
+                    [[0, 1], [0, 1], [1, 1]]
+                ]
+            },
+            'I': {
+                color: 'I',
+                shapes: [
+                    [[1, 1, 1, 1]],
+                    [[1], [1], [1], [1]]
+                ]
+            },
+            'S': {
+                color: 'S',
+                shapes: [
+                    [[0, 1, 1], [1, 1, 0]],
+                    [[1, 0], [1, 1], [0, 1]]
+                ]
+            },
+            'Z': {
+                color: 'Z',
+                shapes: [
+                    [[1, 1, 0], [0, 1, 1]],
+                    [[0, 1], [1, 1], [1, 0]]
+                ]
+            }
+        };
+
+        const PIECE_KEYS = Object.keys(TETROMINOS); // ['T', 'O', 'L', ...]
+
+        // --- Fonctions Utilitaires ---
+
+        /**
+         * Crée la grille de jeu initiale dans le DOM et initialise le tableau 'board'.
+         */
+        function createBoard() {
+            board = []; // Réinitialise le tableau logique
+            gameBoardElement.innerHTML = ''; // Vide l'élément HTML
+            for (let r = 0; r < BOARD_HEIGHT; r++) {
+                board[r] = []; // Crée une nouvelle ligne dans le tableau logique
+                for (let c = 0; c < BOARD_WIDTH; c++) {
+                    board[r][c] = { occupied: false, color: '', locked: false }; // Initialise chaque cellule logique comme vide
+                    const cell = document.createElement('div');
+                    cell.classList.add('cell');
+                    cell.dataset.row = r; // Ajoute des attributs pour identifier la cellule
+                    cell.dataset.col = c;
+                    gameBoardElement.appendChild(cell); // Ajoute la cellule au DOM
+                }
+            }
+        }
+
+        /**
+         * Met à jour l'affichage de la grille dans le DOM en fonction du tableau 'board' et de la pièce actuelle.
+         */
+        function drawBoard() {
+            // 1. Dessine les cellules figées (partie du 'board')
+            for (let r = 0; r < BOARD_HEIGHT; r++) {
+                for (let c = 0; c < BOARD_WIDTH; c++) {
+                    const cellElement = gameBoardElement.querySelector(`[data-row='${r}'][data-col='${c}']`);
+                    if (board[r][c].locked) {
+                        cellElement.className = `cell locked ${board[r][c].color}`; // Applique la couleur et le style 'locked'
+                    } else {
+                        cellElement.className = 'cell'; // Cellule vide normale
+                    }
+                }
+            }
+
+            // 2. Dessine la pièce actuelle (superposée)
+            if (currentPiece) {
+                const shape = currentPiece.shapes[currentRotation];
+                const color = currentPiece.color;
+                shape.forEach((row, y) => {
+                    row.forEach((value, x) => {
+                        if (value === 1) {
+                            const boardRow = currentRow + y;
+                            const boardCol = currentCol + x;
+                            // Vérifie si la cellule est dans les limites de la grille
+                            if (boardRow >= 0 && boardRow < BOARD_HEIGHT && boardCol >= 0 && boardCol < BOARD_WIDTH) {
+                                const cellElement = gameBoardElement.querySelector(`[data-row='${boardRow}'][data-col='${boardCol}']`);
+                                // Assure-toi de ne pas écraser une cellule déjà figée visuellement
+                                if (cellElement && !board[boardRow][boardCol].locked) {
+                                    cellElement.className = `cell active ${color}`; // Applique la couleur et le style 'active'
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+        }
+
+        /**
+         * Sélectionne une nouvelle pièce au hasard et la positionne en haut au centre.
+         * @returns {boolean} - True si la pièce peut être placée, false si collision (Game Over).
+         */
+        function spawnPiece() {
+            const randomKey = PIECE_KEYS[Math.floor(Math.random() * PIECE_KEYS.length)];
+            currentPiece = TETROMINOS[randomKey];
+            currentRotation = 0;
+            // Position initiale : centre horizontalement, tout en haut
+            currentCol = Math.floor(BOARD_WIDTH / 2) - Math.floor(currentPiece.shapes[0][0].length / 2);
+            currentRow = 0; // Commence à la ligne 0
+
+            // Vérifie immédiatement si la nouvelle pièce entre en collision (cas Game Over)
+            if (checkCollision(currentRow, currentCol, currentRotation)) {
+                return false; // Impossible de placer la pièce
+            }
+            return true; // La pièce a été placée avec succès
+        }
+
+        /**
+         * Vérifie si la pièce à la position et rotation données entre en collision
+         * avec les bords de la grille ou avec des pièces déjà figées.
+         * @param {number} row - Ligne cible.
+         * @param {number} col - Colonne cible.
+         * @param {number} rotation - Index de rotation cible.
+         * @returns {boolean} - True si collision, false sinon.
+         */
+        function checkCollision(row, col, rotation) {
+            const shape = currentPiece.shapes[rotation];
+            for (let y = 0; y < shape.length; y++) {
+                for (let x = 0; x < shape[y].length; x++) {
+                    if (shape[y][x] === 1) {
+                        const boardRow = row + y;
+                        const boardCol = col + x;
+
+                        // 1. Collision avec les bords
+                        if (boardCol < 0 || boardCol >= BOARD_WIDTH || boardRow >= BOARD_HEIGHT) {
+                            return true; // Hors limites
+                        }
+
+                        // 2. Collision avec des pièces figées (uniquement si dans la grille)
+                        // On vérifie boardRow >= 0 car une pièce peut commencer au-dessus de la grille visible
+                        if (boardRow >= 0 && board[boardRow][boardCol].locked) {
+                            return true; // Collision avec une pièce existante
+                        }
+                    }
+                }
+            }
+            return false; // Pas de collision
+        }
+
+        /**
+         * Fige la pièce actuelle sur la grille en marquant les cellules correspondantes dans 'board'.
+         */
+        function lockPiece() {
+            const shape = currentPiece.shapes[currentRotation];
+            const color = currentPiece.color;
+            shape.forEach((row, y) => {
+                row.forEach((value, x) => {
+                    if (value === 1) {
+                        const boardRow = currentRow + y;
+                        const boardCol = currentCol + x;
+                        // Important : Vérifier les limites avant de marquer
+                        if (boardRow >= 0 && boardRow < BOARD_HEIGHT && boardCol >= 0 && boardCol < BOARD_WIDTH) {
+                            board[boardRow][boardCol] = { occupied: true, color: color, locked: true };
+                        }
+                    }
+                });
+            });
+        }
+
+        /**
+         * Tente de déplacer la pièce actuelle.
+         * @param {number} dx - Déplacement horizontal ( -1 pour gauche, 1 pour droite).
+         * @param {number} dy - Déplacement vertical (1 pour descendre).
+         * @returns {boolean} - True si le déplacement a réussi, false sinon.
+         */
+        function movePiece(dx, dy) {
+            if (isGameOver) return false;
+
+            const newRow = currentRow + dy;
+            const newCol = currentCol + dx;
+
+            if (!checkCollision(newRow, newCol, currentRotation)) {
+                // Si pas de collision, met à jour la position
+                currentRow = newRow;
+                currentCol = newCol;
+                drawBoard(); // Redessine pour montrer le mouvement
+                return true;
+            }
+            return false; // Collision détectée, mouvement impossible
+        }
+
+        /**
+         * Tente de faire pivoter la pièce actuelle.
+         */
+        function rotatePiece() {
+            if (isGameOver) return;
+
+            const originalRotation = currentRotation;
+            let newRotation = (currentRotation + 1) % currentPiece.shapes.length; // Rotation suivante
+
+            // Essaye la nouvelle rotation
+            if (!checkCollision(currentRow, currentCol, newRotation)) {
+                currentRotation = newRotation; // Applique la rotation
+            } else {
+                // --- Wall Kick (simple) ---
+                // Essaye de décaler à droite
+                if (!checkCollision(currentRow, currentCol + 1, newRotation)) {
+                    currentCol++;
+                    currentRotation = newRotation;
+                }
+                // Essaye de décaler à gauche
+                else if (!checkCollision(currentRow, currentCol - 1, newRotation)) {
+                    currentCol--;
+                    currentRotation = newRotation;
+                }
+                // Si toujours en collision, la rotation échoue
+            }
+
+            // Si la rotation a changé, redessine
+            if (currentRotation !== originalRotation) {
+                drawBoard();
+            }
+        }
+
+        /**
+         * Vérifie si des lignes sont complètes et les supprime.
+         */
+        function clearLines() {
+            let linesCleared = 0;
+            for (let r = BOARD_HEIGHT - 1; r >= 0; r--) {
+                // Vérifie si la ligne 'r' est complète (toutes les cellules sont 'locked')
+                const isLineFull = board[r].every(cell => cell.locked);
+
+                if (isLineFull) {
+                    linesCleared++;
+                    // Appliquer l'effet de cascade aux cellules de la ligne
+                    for (let c = 0; c < BOARD_WIDTH; c++) {
+                        const cellElement = gameBoardElement.querySelector(`[data-row='${r}'][data-col='${c}']`);
+                        if (cellElement) {
+                            cellElement.classList.add('clearing');
+                            // Important: Retirer la classe après l'animation pour éviter les bugs visuels
+                            // On retire aussi la couleur pour que l'animation soit propre
+                            cellElement.style.backgroundColor = ''; // Réinitialise le fond pour l'anim
+                            setTimeout(() => {
+                                cellElement.className = 'cell'; // Nettoie après l'animation
+                            }, 500); // Durée de l'animation CSS
+                        }
+                    }
+
+                    // Décaler toutes les lignes au-dessus vers le bas
+                    for (let y = r; y > 0; y--) {
+                        board[y] = board[y - 1];
+                    }
+                    // Ajouter une nouvelle ligne vide en haut
+                    board[0] = Array(BOARD_WIDTH).fill(0).map(() => ({ occupied: false, color: '', locked: false }));
+
+                    // Comme on a supprimé une ligne et décalé,
+                    // il faut revérifier la même ligne 'r' au cas où la ligne descendue serait aussi complète.
+                    r++;
+                }
+            }
+
+            // Mettre à jour le score si des lignes ont été supprimées
+            if (linesCleared > 0) {
+                updateScore(linesCleared);
+                // Après la suppression et le décalage logique, redessiner immédiatement
+                // pour refléter le nouvel état (avant la fin de l'animation visuelle)
+                // L'animation se chargera de l'effet visuel de disparition.
+                drawBoard();
+            }
+        }
+
+
+        /**
+         * Met à jour le score en fonction du nombre de lignes complétées.
+         * @param {number} linesCleared - Nombre de lignes complétées en même temps.
+         */
+        function updateScore(linesCleared) {
+            let points = 0;
+            switch (linesCleared) {
+                case 1: points = 100; break;
+                case 2: points = 300; break;
+                case 3: points = 500; break;
+                case 4: points = 800; break; // Tetris !
+            }
+            score += points;
+            scoreBoardElement.textContent = `Score: ${score}`;
+
+            // Augmenter la vitesse (optionnel)
+            // currentSpeed = Math.max(100, START_SPEED - Math.floor(score / 1000) * 50);
+            // resetGameInterval(); // Appliquer la nouvelle vitesse
+        }
+
+        /**
+         * Gère la fin de partie.
+         */
+        function gameOver() {
+            isGameOver = true;
+            clearInterval(gameInterval); // Arrête la descente automatique
+            gameOverElement.style.display = 'block'; // Affiche le message Game Over
+            console.log("Game Over! Score final:", score);
+        }
+
+        /**
+         * Boucle principale du jeu (appelée par setInterval).
+         */
+        function gameLoop() {
+            if (isGameOver) return;
+
+            // 1. Essayer de descendre la pièce
+            if (!movePiece(0, 1)) {
+                // Si la pièce ne peut plus descendre :
+                // a. Vérifier si la pièce est bloquée tout en haut (Game Over)
+                if (currentRow <= 0) {
+                    // Figer la pièce même si elle est en haut pour la rendre visible avant le game over
+                    lockPiece();
+                    drawBoard(); // Afficher la pièce figée
+                    gameOver();
+                    return; // Sortir de la boucle
+                }
+
+                // b. Figer la pièce à sa position actuelle
+                lockPiece();
+
+                // c. Vérifier et supprimer les lignes complètes
+                clearLines(); // clearLines redessine déjà si nécessaire
+
+                // d. Faire apparaître une nouvelle pièce
+                if (!spawnPiece()) {
+                    // Si la nouvelle pièce ne peut pas apparaître (collision immédiate)
+                    drawBoard(); // Dessine l'état final avant le game over
+                    gameOver();
+                    return; // Sortir de la boucle
+                }
+                 // Si une nouvelle pièce apparaît, redessiner pour l'afficher
+                 drawBoard();
+            }
+             // Si la pièce a pu descendre, movePiece a déjà appelé drawBoard()
+        }
+
+
+        /**
+         * Réinitialise et redémarre l'intervalle de jeu (pour changer la vitesse).
+         */
+        function resetGameInterval() {
+            clearInterval(gameInterval);
+            if (!isGameOver) {
+                gameInterval = setInterval(gameLoop, currentSpeed);
+            }
+        }
+
+        // --- Gestion des contrôles clavier ---
+        document.addEventListener('keydown', (event) => {
+            if (isGameOver) return;
+
+            switch (event.code) { // Utiliser event.code est souvent plus fiable pour les touches spéciales
+                case 'ArrowLeft': // Flèche gauche
+                    movePiece(-1, 0);
+                    break;
+                case 'ArrowRight': // Flèche droite
+                    movePiece(1, 0);
+                    break;
+                case 'ArrowDown': // Flèche bas (accélérer)
+                    if (movePiece(0, 1)) {
+                        // Optionnel: Réinitialiser le timer si on accélère manuellement
+                        // resetGameInterval();
+                    } else {
+                        // Si on ne peut pas descendre plus bas, déclencher la logique de fin de tour
+                        gameLoop();
+                    }
+                    break;
+                case 'ArrowUp': // Flèche haut (rotation)
+                    rotatePiece();
+                    break;
+                case 'Space': // Barre d'espace (Hard Drop)
+                    // Descend la pièce au maximum possible
+                    while (movePiece(0, 1)) {
+                        // Continue de descendre tant que c'est possible
+                    }
+                    // Une fois la pièce en bas, déclenche immédiatement la logique de fin de tour
+                    // (figer, vérifier lignes, nouvelle pièce)
+                    gameLoop();
+                    // Empêche le comportement par défaut de la barre d'espace (ex: scrolling)
+                    event.preventDefault();
+                    break;
+            }
+        });
+
+        // --- Initialisation du jeu ---
+        function startGame() {
+            isGameOver = false;
+            score = 0;
+            currentSpeed = START_SPEED;
+            scoreBoardElement.textContent = `Score: ${score}`;
+            gameOverElement.style.display = 'none';
+            createBoard(); // Crée la grille logique et visuelle
+            if (spawnPiece()) { // Fait apparaître la première pièce
+                drawBoard(); // Dessine l'état initial
+                resetGameInterval(); // Démarre la boucle de jeu
+            } else {
+                gameOver(); // Ne devrait pas arriver au début, mais sécurité
+            }
+        }
+
+        // --- Démarrage ---
+        startGame();
+
+    </script>
+</body>
+</html>
